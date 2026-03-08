@@ -1,11 +1,12 @@
---part b
-use [LogicalProject]
+-- Part B
+USE [LogicalProject];
 
--- בעיה א'-מתוך כל המשתמשים התובעניים לקחתי את מי שממוצע הצפיפות של הבקשות שלו היא הגדולה ביותר
---בעקבות הנתונים שמגדירים משתמש כתובעני שיערתי שהגורם העיקרי שמפריע בתובענות למערכת הוא הצפיפות  
+-- Problem A: Identify the most "demanding" user based on request density (RPM)
+-- Logic: Out of all demanding users, selecting the one with the highest average request density.
+-- Assumption: Request density is the primary factor impacting system performance.
 
 ;WITH UserBursts AS (
-    -- שלב 1: זיהוי כל חריגה מהרף של 10 פניות ב-5 דקות
+    -- Step 1: Identify instances exceeding the threshold of 10 requests within 5 minutes
     SELECT 
         T1.UserID,
         T1.RequestTime AS WindowStart,
@@ -18,7 +19,7 @@ use [LogicalProject]
     HAVING COUNT(T2.RequestID) > 10
 ),
 BurstsWithMetrics AS (
-    --  חישוב רמת התובענות (עצימות RPM) לכל חריגה
+    -- Step 2: Calculate intensity (Requests Per Minute - RPM) for each burst
     SELECT 
         UserID,
         CAST(RequestCount AS FLOAT) / 
@@ -26,23 +27,23 @@ BurstsWithMetrics AS (
     FROM UserBursts
 ),
 UserPeakIntensity AS (
-    --  מציאת שיא התובענות לכל משתמש
+    -- Step 3: Find the peak intensity for each user
     SELECT 
         UserID,
         MAX(RequestsPerMinute) AS MaxRPM
     FROM BurstsWithMetrics
     GROUP BY UserID
 )
---  שליפת המשתמש (או המשתמשים) עם רמת התובענות המקסימלית במערכת
+-- Select the user(s) with the absolute maximum intensity in the system
 SELECT TOP 1 WITH TIES
     UserID
 FROM UserPeakIntensity
 ORDER BY MaxRPM DESC;
 
--- בעיה ב
--- פתרון דינמי: בניית טבלת החלטות לפי ציר זמן 
+-- Problem B: Dynamic Solution - Building a decision table based on the timeline
+-- Goal: Maximize total priority while avoiding overlapping requests.
 
--- 1. נכין טבלה זמנית עם הבקשות מסודרות לפי זמן סיום (קריטי ל-DP)
+-- 1. Prepare a temporary table with requests ordered by completion time (Essential for DP)
 SELECT 
     ROW_NUMBER() OVER (ORDER BY ResponseTime ASC) AS StepID,
     RequestID, Priority, RequestTime, ResponseTime
@@ -50,9 +51,9 @@ INTO #OrderedRequests
 FROM UserRequests
 WHERE ResponseTime <= ExpirationTime;
 
--- 2. שימוש ב-CTE כדי לממש את נוסחת הנסיגה של התכנון הדינמי
+-- 2. Use CTE to implement the Dynamic Programming (DP) recursion formula
 WITH DP_Table AS (
-    -- מקרה בסיס: הבקשה הראשונה
+    -- Base Case: The first request
     SELECT 
         StepID,
         Priority AS BestPriority,
@@ -63,7 +64,7 @@ WITH DP_Table AS (
 
     UNION ALL
 
-    -- שלב דינמי: האם כדאי להוסיף את הבקשה הנוכחית או להישאר עם מה שיש?
+    -- Dynamic Step: Decide whether to include the current request or keep the previous best state
     SELECT 
         R.StepID,
         CASE 
@@ -84,14 +85,14 @@ WITH DP_Table AS (
     FROM #OrderedRequests R
     JOIN DP_Table Prev ON R.StepID = Prev.StepID + 1
 )
--- 3. התוצאה הסופית היא השורה האחרונה בטבלה הדינמית
+-- 3. The final result is the last row in the dynamic table
 SELECT TOP 1 BestPath, BestPriority
 FROM DP_Table
 ORDER BY StepID DESC;
 
 DROP TABLE #OrderedRequests;
 
--- בעיה ג
+-- Problem C: System Bottleneck Analysis
 ;WITH SortedReqs AS (
     SELECT 
         ROW_NUMBER() OVER (ORDER BY RequestTime) AS ID,
@@ -101,18 +102,18 @@ DROP TABLE #OrderedRequests;
     FROM UserRequests
 ),
 RecursiveBottleneck AS (
-    -- חלק העוגן (Anchor)
+    -- Anchor Member
     SELECT 
         ID,
         RequestTime AS StartTime,
         ResponseTime AS EndTime,
         WaitTime AS TotalWait,
-        CAST(1 AS FLOAT) AS RequestCount -- התיקון כאן: הגדרת סוג הנתונים כ-FLOAT
+        CAST(1 AS FLOAT) AS RequestCount 
     FROM SortedReqs
 
     UNION ALL
 
-    -- החלק הרקורסיבי
+    -- Recursive Member
     SELECT 
         S.ID,
         R.StartTime,
@@ -122,6 +123,7 @@ RecursiveBottleneck AS (
     FROM SortedReqs S
     INNER JOIN RecursiveBottleneck R ON S.ID = R.ID + 1
 )
+-- Find the interval with the highest average wait time
 SELECT TOP 1 WITH TIES
     StartTime AS IntervalStart,
     EndTime AS IntervalEnd,
