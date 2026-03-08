@@ -1,68 +1,80 @@
-use LogicalProject;
+USE LogicalProject;
 
---1
---לא נתון איך לחלק את ההנחה כיוון שההנחה ברמת חשבונית התיחסתי לזה לפי יחס פרופורציונלי
-with CalculatedLines as(
- select l.[DocNum], l.[ItemCode], l.[Qty],
- l.[LineSum]-(
- l.[LineSum]/ cast(nullif(sum(l.[LineSum]) over(partition by l.[DocNum]),0) as money)
- *isnull(h.[DocDiscount],0)
- ) as Line_total_cost
-  from [dbo].[SalesLine] l
-  join [dbo].[SalesHeader] h on l.[DocNum]=h.[DocNum]
+-- 1
+-- Note: Since the discount is at the invoice header level, it is distributed across line items proportionally to their relative sum.
+WITH CalculatedLines AS (
+    SELECT 
+        l.[DocNum], 
+        l.[ItemCode], 
+        l.[Qty],
+        l.[LineSum] - (
+            l.[LineSum] / CAST(NULLIF(SUM(l.[LineSum]) OVER(PARTITION BY l.[DocNum]), 0) AS MONEY)
+            * ISNULL(h.[DocDiscount], 0)
+        ) AS Line_total_cost
+    FROM [dbo].[SalesLine] l
+    JOIN [dbo].[SalesHeader] h ON l.[DocNum] = h.[DocNum]
 )
-select [ItemCode],sum([Qty]) as amount,sum(Line_total_cost)as SalesAmount, count(distinct [DocNum]) as InvoiceCount
-from CalculatedLines
-group by [ItemCode]
+SELECT 
+    [ItemCode],
+    SUM([Qty]) AS TotalQuantity,
+    SUM(Line_total_cost) AS SalesAmount, 
+    COUNT(DISTINCT [DocNum]) AS InvoiceCount
+FROM CalculatedLines
+GROUP BY [ItemCode];
 
---2
-select [DocNum]
-from [dbo].[SalesLine]
-where [ItemCode] in (3611010,3611600) 
-group by [DocNum]
-having count(distinct [ItemCode])=2
---option 2
-SELECT [DocNum] FROM [dbo].[SalesLine] WHERE [ItemCode] =3611010
+-- 2
+SELECT [DocNum]
+FROM [dbo].[SalesLine]
+WHERE [ItemCode] IN (3611010, 3611600) 
+GROUP BY [DocNum]
+HAVING COUNT(DISTINCT [ItemCode]) = 2;
+
+-- Option 2
+SELECT [DocNum] FROM [dbo].[SalesLine] WHERE [ItemCode] = 3611010
 INTERSECT
-SELECT [DocNum] FROM [dbo].[SalesLine] WHERE [ItemCode] = 3611600
+SELECT [DocNum] FROM [dbo].[SalesLine] WHERE [ItemCode] = 3611600;
 
---3
-select p.[SalesPersonCode],p.[SalesPersonName],count(distinct l.[ItemCode])
-from [dbo].[SalesPerson] p
-join [dbo].[SalesHeader] h on p.[SalesPersonCode]=h.[SalesPersonCode]
-join [dbo].[SalesLine] l on h.DocNum=l.DocNum
-group by p.[SalesPersonCode],p.[SalesPersonName]
-having count(distinct [ItemCode])=(select count(distinct [ItemCode]) from [dbo].[Items])
+-- 3
+SELECT 
+    p.[SalesPersonCode],
+    p.[SalesPersonName],
+    COUNT(DISTINCT l.[ItemCode]) AS DistinctItemsSold
+FROM [dbo].[SalesPerson] p
+JOIN [dbo].[SalesHeader] h ON p.[SalesPersonCode] = h.[SalesPersonCode]
+JOIN [dbo].[SalesLine] l ON h.DocNum = l.DocNum
+GROUP BY p.[SalesPersonCode], p.[SalesPersonName]
+HAVING COUNT(DISTINCT [ItemCode]) = (SELECT COUNT(DISTINCT [ItemCode]) FROM [dbo].[Items]);
 
---4
---הערה לוגית: השאילתה מתבססת על אנשי מכירות המופיעים בטבלת המכירות 
---(SalesHeader). במידה ויש צורך להתייחס גם לאנשי מכירות רשומים שטרם ביצעו מכירות כאל "המכירה הנמוכה ביותר" 
-;with cte as(
-select h.[SalesPersonCode],
-RANK() over(order by ISNULL(sum(l.qty),0) DESC) as ItemCountDescD,
-RANK() over(order by count(distinct l.[ItemCode]) DESC) as ItemVarietyDescD,
-RANK() over(order by  ISNULL(count(distinct l.[ItemCode]),0) ASC) as ItemVarietyAscD
-from [dbo].[SalesPerson] p
-left join [dbo].[SalesHeader] h on p.[SalesPersonCode]=h.[SalesPersonCode]
-left join [dbo].[SalesLine] l on h.[DocNum]=l.[DocNum]
-group by  h.[SalesPersonCode]
+-- 4
+-- Logic Note: This query focuses on salespeople present in the SalesHeader table. 
+-- To include registered salespeople who haven't made any sales as "lowest performers", use a LEFT JOIN.
+WITH cte AS (
+    SELECT 
+        h.[SalesPersonCode],
+        RANK() OVER(ORDER BY ISNULL(SUM(l.qty), 0) DESC) AS ItemCountDescD,
+        RANK() OVER(ORDER BY COUNT(DISTINCT l.[ItemCode]) DESC) AS ItemVarietyDescD,
+        RANK() OVER(ORDER BY ISNULL(COUNT(DISTINCT l.[ItemCode]), 0) ASC) AS ItemVarietyAscD
+    FROM [dbo].[SalesPerson] p
+    LEFT JOIN [dbo].[SalesHeader] h ON p.[SalesPersonCode] = h.[SalesPersonCode]
+    LEFT JOIN [dbo].[SalesLine] l ON h.[DocNum] = l.[DocNum]
+    GROUP BY h.[SalesPersonCode]
 )
-select distinct l.[ItemCode]
-from [SalesLine] l
-join [dbo].[SalesHeader] h on l.DocNum=h.DocNum   
-join cte c on h.SalesPersonCode=c.SalesPersonCode
-where c.ItemCountDescD=1 or c.ItemVarietyDescD=1
+SELECT DISTINCT l.[ItemCode]
+FROM [SalesLine] l
+JOIN [dbo].[SalesHeader] h ON l.DocNum = h.DocNum   
+JOIN cte c ON h.SalesPersonCode = c.SalesPersonCode
+WHERE c.ItemCountDescD = 1 OR c.ItemVarietyDescD = 1
 
 EXCEPT
 
-select distinct l.[ItemCode]
-from [SalesLine] l
-join [dbo].[SalesHeader] h on l.DocNum=h.DocNum   
-join cte c on h.SalesPersonCode=c.SalesPersonCode
-where c.ItemVarietyAscD=1 
+SELECT DISTINCT l.[ItemCode]
+FROM [SalesLine] l
+JOIN [dbo].[SalesHeader] h ON l.DocNum = h.DocNum   
+JOIN cte c ON h.SalesPersonCode = c.SalesPersonCode
+WHERE c.ItemVarietyAscD = 1;
 
---5
-;WITH LineNet AS (
+-- 5
+WITH LineNet AS (
     SELECT
         sh.SalesPersonCode,
         sp.SalesPersonName,
@@ -93,18 +105,17 @@ Comparison AS (
         AVG(AvgPricePerUnit) OVER (PARTITION BY SalesPersonCode) AS SpAvgPricePerUnit
     FROM ItemSales
 )
-
 SELECT
     SalesPersonName,
     ItemCode,
-    CAST(AvgPricePerUnit AS MONEY) AS [ממוצע מכירות ליחידה],
-    CAST(TotalSalesPerItem AS MONEY) AS [סכום המכירות]
+    CAST(AvgPricePerUnit AS MONEY) AS AvgSalesPerUnit,
+    CAST(TotalSalesPerItem AS MONEY) AS TotalSalesAmount
 FROM Comparison
 WHERE AvgPricePerUnit < SpAvgPricePerUnit
 ORDER BY SalesPersonName, AvgPricePerUnit ASC;
 
---6
-;WITH SalesByPerson AS (
+-- 6
+WITH SalesByPerson AS (
     SELECT 
         p.SalesPersonCode,
         p.SalesPersonName,
@@ -145,7 +156,7 @@ JOIN [dbo].[SalesLine] l ON h.DocNum = l.DocNum
 GROUP BY f.SalesPersonName, h.DocNum, h.DocDate, f.TotalQty, f.CumulativePercent
 ORDER BY f.TotalQty DESC, h.DocDate ASC; 
 
---7
+-- 7
 SELECT 
     p.SalesPersonCode,
     p.SalesPersonName,
@@ -178,11 +189,4 @@ SELECT
             GROUP BY h.DocNum
         ) AS Invoices
     ), 0) AS AvgInvoiceAmount
-
 FROM SalesPerson p;
-
-
-
-
-
-
