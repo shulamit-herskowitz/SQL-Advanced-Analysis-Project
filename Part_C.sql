@@ -1,7 +1,9 @@
-use [LogicalProject]
---חלק ג
---סעיף א
-/* פתרון לחלק ג' - מציאת שלשות בטבלה A שסכומן X */
+-- Part C
+USE [LogicalProject];
+
+-- Section A
+-- Problem: Finding all triplets in TableA that sum up to X.
+-- This implementation uses CROSS JOINs to find all possible combinations.
 
 DECLARE @X INT = 32;
 
@@ -16,7 +18,10 @@ CROSS JOIN TableA T3
 WHERE (T1.Val + T2.Val + T3.Val) = @X
 ORDER BY Num1, Num2, Num3;
 
---סעיף ב
+-- Section B
+-- Optimized approach: Storing unique triplets (where Num1 < Num2 < Num3) into a temporary table.
+-- This avoids duplicate sets and self-matching of the same row index.
+
 SELECT 
     T1.Val AS num1, 
     T2.Val AS num2, 
@@ -27,7 +32,9 @@ JOIN TableA T2 ON T1.Val < T2.Val
 JOIN TableA T3 ON T2.Val < T3.Val  
 WHERE (T1.Val + T2.Val + T3.Val) = @x;
 
---סעיף ג
+-- Section C
+-- Finding the triplet with the maximum product from the filtered results.
+
 SELECT TOP 1 
     num1, 
     num2, 
@@ -35,5 +42,5 @@ SELECT TOP 1
     (num1 * num2 * num3) AS MaxProduct
 FROM #temp_table
 ORDER BY (num1 * num2 * num3) DESC;
-DROP TABLE #temp_table;
 
+DROP TABLE #temp_table;
