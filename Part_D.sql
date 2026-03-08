@@ -1,7 +1,9 @@
-use [LogicalProject]
-go
+-- Part D
+USE [LogicalProject];
+GO
 
---חלק ד
+-- Custom String Reversal Function
+-- Logic: Iterates through the input string from last character to first to build a reversed string.
 CREATE FUNCTION dbo.MyCustomReverse (@InputString NVARCHAR(MAX))
 RETURNS NVARCHAR(MAX)
 AS
@@ -19,8 +21,9 @@ BEGIN
     RETURN @ReversedString;
 END;
 GO
---הדגמת שימוש
--- שימוש בפונקציה על שם איש המכירות
+
+-- Usage Demonstration
+-- Applying the custom function to the SalesPersonName column
 SELECT 
     SalesPersonName, 
     dbo.MyCustomReverse(SalesPersonName) AS ReversedName
